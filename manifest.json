@@ -1,6 +1,6 @@
 {
-  "name": "OMI 記帳本",
-  "short_name": "OMI記帳",
+  "name": "MyMoneyApp",
+  "short_name": "MyMoneyApp",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f5f7fa",
