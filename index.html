@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>MyMoneyApp</title>
     
     <link rel="manifest" href="manifest.json">
@@ -18,14 +18,17 @@
             --asset-yellow: #fcc419; --liab-purple: #9c36b5; --net-red: #fa5252;
             --transfer-color: #15aabf;
         }
-        /* 禁止選取與彈性捲動 (App質感) */
+        
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; 
             background-color: var(--bg-color); color: var(--text-primary); 
-            margin: 0; padding: 20px; 
+            margin: 0; 
+            /* V14.8 Fix: 增加頂部間距，並適配 iPhone 瀏海 */
+            padding: calc(20px + env(safe-area-inset-top)) 20px 20px 20px; 
             -webkit-user-select: none; user-select: none;
             overscroll-behavior-y: none;
         }
+        
         .container { max-width: 900px; margin: 0 auto; padding-bottom: 80px; }
         
         /* Header */
@@ -41,6 +44,8 @@
             display: none; position: fixed; top:0; left:0; width:100%; height:100%; 
             background:rgba(0,0,0,0.5); z-index: 10000; 
             justify-content:center; align-items:center; 
+            /* V14.8 Fix: Modal 也要避開瀏海 */
+            padding-top: env(safe-area-inset-top);
         }
         .modal-overlay.active { display: flex; }
 
@@ -152,7 +157,7 @@
 
 <div class="container">
     <div class="header">
-        <h2 id="appTitleDisplay" class="app-title">💰 OMI 記帳本</h2>
+        <h2 id="appTitleDisplay" class="app-title">💰 記帳本 V14.8</h2>
         <div>
             <button class="mode-btn" id="btnLog" onclick="switchView('log')">📝 流水帳</button>
             <button class="mode-btn" id="btnStats" onclick="switchView('stats')">📈 統計</button>
@@ -317,7 +322,7 @@
         transactions: [],
         subAccounts: {} 
     };
-    let appData = JSON.parse(localStorage.getItem('myMoneyV146')) || defaultData;
+    let appData = JSON.parse(localStorage.getItem('myMoneyV148')) || defaultData;
     if(!appData.accountColors) appData.accountColors = defaultData.accountColors;
     if(!appData.subAccounts) appData.subAccounts = {}; 
     if(appData.accounts) { appData.accounts.forEach(acc => { if(!appData.accountColors[acc]) appData.accountColors[acc] = '#339af0'; }); }
@@ -332,7 +337,7 @@
     // Adjustment Vars
     let adjMainAccount = '';
 
-    function saveData() { localStorage.setItem('myMoneyV146', JSON.stringify(appData)); }
+    function saveData() { localStorage.setItem('myMoneyV148', JSON.stringify(appData)); }
 
     window.onload = function() {
         document.getElementById('dateInput').valueAsDate = new Date();
@@ -476,7 +481,7 @@
     function exportData(){ 
         const a=document.createElement('a'); 
         a.href='data:text/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(appData)); 
-        a.download='money_backup_v146.json'; 
+        a.download='money_backup_v148.json'; 
         a.click(); 
     }
 
