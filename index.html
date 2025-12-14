@@ -23,7 +23,6 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; 
             background-color: var(--bg-color); color: var(--text-primary); 
             margin: 0; 
-            /* V14.9 Fix: 確保頂部不會被切到，並保證最小高度 */
             padding-top: calc(20px + env(safe-area-inset-top));
             padding-bottom: calc(20px + env(safe-area-inset-bottom));
             padding-left: 20px;
@@ -69,11 +68,19 @@
         .add-row-btn { width: 100%; padding: 8px; background: #e7f5ff; color: var(--primary-color); border: 1px dashed var(--primary-color); border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 5px; }
         .add-row-btn:hover { background: #d0ebff; }
         
-        /* === 資產頁面 === */
+        /* === 資產頁面 (V14.10: 手機版面優化) === */
         .summary-bar { display: flex; border-radius: 12px; overflow: hidden; margin-bottom: 24px; color: white; text-align: center; font-weight: bold; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .summary-item { padding: 20px 10px; flex: 1; display: flex; flex-direction: column; justify-content: center; }
-        .summary-label { font-size: 13px; opacity: 0.9; margin-bottom: 5px; font-weight: normal; }
-        .summary-val { font-size: 20px; font-family: 'SF Mono', monospace; letter-spacing: 0.5px; }
+        .summary-item { padding: 20px 10px; flex: 1; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+        .summary-label { font-size: 13px; opacity: 0.9; margin-bottom: 5px; font-weight: normal; white-space: nowrap; }
+        .summary-val { font-size: 20px; font-family: 'SF Mono', monospace; letter-spacing: 0.5px; white-space: nowrap; }
+
+        /* V14.10: 針對手機螢幕寬度小於 600px 的優化 */
+        @media (max-width: 600px) {
+            .summary-item { padding: 15px 2px; } /* 減少內距 */
+            .summary-label { font-size: 11px; }  /* 標籤字變小 */
+            .summary-val { font-size: 15px; letter-spacing: 0; }    /* 金額字變小，讓它塞得下 */
+        }
+
         .balance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; }
         .balance-card { border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); background: #fff; border-top: 6px solid #ccc; transition: transform 0.2s; position: relative; }
         .balance-card:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
@@ -326,7 +333,7 @@
         transactions: [],
         subAccounts: {} 
     };
-    let appData = JSON.parse(localStorage.getItem('myMoneyV149')) || defaultData;
+    let appData = JSON.parse(localStorage.getItem('myMoneyV1410')) || defaultData;
     if(!appData.accountColors) appData.accountColors = defaultData.accountColors;
     if(!appData.subAccounts) appData.subAccounts = {}; 
     if(appData.accounts) { appData.accounts.forEach(acc => { if(!appData.accountColors[acc]) appData.accountColors[acc] = '#339af0'; }); }
@@ -341,7 +348,7 @@
     // Adjustment Vars
     let adjMainAccount = '';
 
-    function saveData() { localStorage.setItem('myMoneyV149', JSON.stringify(appData)); }
+    function saveData() { localStorage.setItem('myMoneyV1410', JSON.stringify(appData)); }
 
     window.onload = function() {
         document.getElementById('dateInput').valueAsDate = new Date();
@@ -736,7 +743,7 @@
     function toggleDateSort() { sortOrder = sortOrder === 'desc' ? 'asc' : 'desc'; document.getElementById('dateSortBtn').innerText = sortOrder === 'desc' ? '▼' : '▲'; renderTable(); }
     
     function parseCSVLine(text) { const result = []; let cell = ''; let inQuotes = false; for (let i = 0; i < text.length; i++) { const char = text[i]; if (char === '"') inQuotes = !inQuotes; else if (char === ',' && !inQuotes) { result.push(cell); cell = ''; } else cell += char; } result.push(cell); return result.map(c => c.trim().replace(/^"|"$/g, '').replace(/""/g, '"')); }
-    function processCSV() { const fileInput = document.getElementById('csvFileInput'); const file = fileInput.files[0]; const encoding = document.getElementById('csvEncoding').value; if (!file) return alert("请先選擇 CSV 檔案"); const reader = new FileReader(); reader.onload = function(e) { const text = e.target.result; const rows = text.replace(/\r\n/g, '\n').split('\n'); if(rows.length < 2) return alert("檔案內容為空"); const headers = parseCSVLine(rows[0]); const idxDate = headers.findIndex(h => h.includes('日期')); const idxAcc = headers.findIndex(h => h.includes('帳戶')); const idxType = headers.findIndex(h => h.includes('收支')); const idxAmt = headers.findIndex(h => h.includes('金額')); const idxCat = headers.findIndex(h => h.includes('類別')); const idxDesc = headers.findIndex(h => h.includes('描述')); if (idxDate === -1 || idxAcc === -1 || idxAmt === -1) return alert(`匯入失敗：找不到關鍵欄位。\n我們抓到的標題：${headers.join(', ')}\n請確保 CSV 第一列包含：日期, 帳戶, 金額`); let successCount = 0; let skipCount = 0; for (let i = 1; i < rows.length; i++) { const rowText = rows[i].trim(); if (!rowText) continue; const cols = parseCSVLine(rowText); let dateStr = cols[idxDate]; const account = cols[idxAcc]; let type = idxType !== -1 ? cols[idxType] : '支出'; let amountStr = cols[idxAmt]; let category = idxCat !== -1 ? cols[idxCat] : ''; const desc = idxDesc !== -1 ? cols[idxDesc] : ''; if (!amountStr) continue; amountStr = amountStr.replace(/[$,\s]/g, ''); let amount = parseFloat(amountStr); dateStr = dateStr.replace(/\//g, '-'); if(dateStr.indexOf('-') > -1 && dateStr.length < 8) dateStr = '2025-' + dateStr; const dParts = dateStr.split('-'); if(dParts.length === 3) { if(dParts[1].length === 1) dParts[1] = '0' + dParts[1]; if(dParts[2].length === 1) dParts[2] = '0' + dParts[2]; dateStr = dParts.join('-'); } if (!dateStr || isNaN(amount) || !account) { skipCount++; continue; } if (type === '支出' && amount > 0) amount = -amount; if (type === '收入' && amount < 0) amount = Math.abs(amount); if (!appData.accounts.includes(account)) { appData.accounts.push(account); appData.accountColors[account] = '#868e96'; } if (type !== '不計入' && appData.categories[type] && category && !appData.categories[type].includes(category)) { appData.categories[type].push(category); } appData.transactions.push({ id: Date.now() + i, date: dateStr, account, type, amount, category, desc }); successCount++; } appData.transactions.sort((a, b) => b.date.localeCompare(a.date)); saveData(); alert(`成功匯入 ${successCount} 筆資料！\n(跳過 ${skipCount} 筆異常資料)`); location.reload(); }; reader.readAsText(file, encoding); }
+    function processCSV() { const fileInput = document.getElementById('csvFileInput'); const file = fileInput.files[0]; const encoding = document.getElementById('csvEncoding').value; if (!file) return alert("請先選擇 CSV 檔案"); const reader = new FileReader(); reader.onload = function(e) { const text = e.target.result; const rows = text.replace(/\r\n/g, '\n').split('\n'); if(rows.length < 2) return alert("檔案內容為空"); const headers = parseCSVLine(rows[0]); const idxDate = headers.findIndex(h => h.includes('日期')); const idxAcc = headers.findIndex(h => h.includes('帳戶')); const idxType = headers.findIndex(h => h.includes('收支')); const idxAmt = headers.findIndex(h => h.includes('金額')); const idxCat = headers.findIndex(h => h.includes('類別')); const idxDesc = headers.findIndex(h => h.includes('描述')); if (idxDate === -1 || idxAcc === -1 || idxAmt === -1) return alert(`匯入失敗：找不到關鍵欄位。\n我們抓到的標題：${headers.join(', ')}\n請確保 CSV 第一列包含：日期, 帳戶, 金額`); let successCount = 0; let skipCount = 0; for (let i = 1; i < rows.length; i++) { const rowText = rows[i].trim(); if (!rowText) continue; const cols = parseCSVLine(rowText); let dateStr = cols[idxDate]; const account = cols[idxAcc]; let type = idxType !== -1 ? cols[idxType] : '支出'; let amountStr = cols[idxAmt]; let category = idxCat !== -1 ? cols[idxCat] : ''; const desc = idxDesc !== -1 ? cols[idxDesc] : ''; if (!amountStr) continue; amountStr = amountStr.replace(/[$,\s]/g, ''); let amount = parseFloat(amountStr); dateStr = dateStr.replace(/\//g, '-'); if(dateStr.indexOf('-') > -1 && dateStr.length < 8) dateStr = '2025-' + dateStr; const dParts = dateStr.split('-'); if(dParts.length === 3) { if(dParts[1].length === 1) dParts[1] = '0' + dParts[1]; if(dParts[2].length === 1) dParts[2] = '0' + dParts[2]; dateStr = dParts.join('-'); } if (!dateStr || isNaN(amount) || !account) { skipCount++; continue; } if (type === '支出' && amount > 0) amount = -amount; if (type === '收入' && amount < 0) amount = Math.abs(amount); if (!appData.accounts.includes(account)) { appData.accounts.push(account); appData.accountColors[account] = '#868e96'; } if (type !== '不計入' && appData.categories[type] && category && !appData.categories[type].includes(category)) { appData.categories[type].push(category); } appData.transactions.push({ id: Date.now() + i, date: dateStr, account, type, amount, category, desc }); successCount++; } appData.transactions.sort((a, b) => b.date.localeCompare(a.date)); saveData(); alert(`成功匯入 ${successCount} 筆資料！\n(跳過 ${skipCount} 筆異常資料)`); location.reload(); }; reader.readAsText(file, encoding); }
     function startEdit(id){ const tx=appData.transactions.find(t=>t.id==id); if(!tx)return; document.getElementById('dateInput').value=tx.date; document.getElementById('accountInput').value=tx.account; document.getElementById('typeInput').value=tx.type; handleTypeChange(); setTimeout(() => { if(tx.subAccount) document.getElementById('subAccountInput').value = tx.subAccount; }, 50); updateCategorySelect(); document.getElementById('categoryInput').value=tx.category; document.getElementById('amountInput').value=Math.abs(tx.amount); document.getElementById('descInput').value=tx.desc; editingId=id; document.getElementById('mainActionBtn').innerText='💾 儲存修改'; document.getElementById('mainActionBtn').classList.add('update-mode'); document.getElementById('cancelEditBtn').classList.remove('hidden'); document.querySelector('.container').scrollIntoView({behavior:'smooth'}); }
     function cancelEditMode(){ editingId=null; document.getElementById('amountInput').value=''; document.getElementById('descInput').value=''; document.getElementById('mainActionBtn').innerText='＋ 新增'; document.getElementById('mainActionBtn').classList.remove('update-mode'); document.getElementById('cancelEditBtn').classList.add('hidden'); document.getElementById('typeInput').value='支出'; handleTypeChange(); }
     function deleteTx(id){ if(confirm('刪除？')){ appData.transactions=appData.transactions.filter(t=>t.id!=id); if(editingId==id)cancelEditMode(); saveData(); initLogFilters(); renderTable(); calculateAndRenderBalance(); } }
