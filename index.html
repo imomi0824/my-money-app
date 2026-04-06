@@ -1078,7 +1078,7 @@ function txItemHTML(tx, compact) {
     sub = accName(tx.accountId) + ' → ' + accName(tx.toAccountId) + (tx.desc ? ' · ' + tx.desc : '');
   } else if (tx.type === 'valuation') {
     label = m.label;
-    sub = accName(tx.accountId) + (tx.desc ? ' · ' + tx.desc : '');
+    sub = accName(tx.accountId) + (tx.subAccountId ? ' · ' + subName(tx.subAccountId) : '') + (tx.desc ? ' · ' + tx.desc : '');
   }
   const amtStr = tx.type === 'expense' || tx.type === 'loan_payment' ? '-'+fmt(tx.type==='loan_payment'?(tx.principalAmount+tx.interestAmount):tx.amount) :
                  tx.type === 'valuation' ? fmtSigned(tx.amount) :
