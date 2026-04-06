@@ -439,6 +439,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-s
     </div>
     <div id="stat-cats" style="padding:0 4px 8px"></div>
   </div>
+  <button onclick="exportPDF()" style="width:100%;padding:13px;border:none;border-radius:var(--r-sm);
+    background:var(--primary);color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-top:4px;
+    box-shadow:0 4px 12px rgba(99,102,241,.3)">📄 下載 PDF 報表</button>
 </section>
 
 <!-- ===== SETTINGS ===== -->
@@ -582,6 +585,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-s
         <option value="bank">🏦 銀行帳戶（資產）</option>
         <option value="cash">💵 現金（資產）</option>
         <option value="investment">📈 投資帳戶（資產）</option>
+        <option value="receivable">🤝 借出/應收（資產）</option>
         <option value="credit_card">💳 信用卡（負債）</option>
         <option value="loan">🏠 貸款（負債）</option>
       </select>
@@ -754,6 +758,7 @@ const SUBTYPE_INFO = {
   bank:        { label:'銀行帳戶', icon:'🏦', type:'asset',     defaultColor:'#3b82f6' },
   cash:        { label:'現金',     icon:'💵', type:'asset',     defaultColor:'#10b981' },
   investment:  { label:'投資帳戶', icon:'📈', type:'asset',     defaultColor:'#8b5cf6' },
+  receivable:  { label:'借出/應收', icon:'🤝', type:'asset',     defaultColor:'#06b6d4' },
   credit_card: { label:'信用卡',   icon:'💳', type:'liability', defaultColor:'#ef4444' },
   loan:        { label:'貸款',     icon:'🏠', type:'liability', defaultColor:'#f59e0b' },
 };
@@ -836,7 +841,7 @@ function getTotals(txList) {
 }
 
 function getSubSpent(accId, subId, year) {
-  // For bank/cash envelope model: count expenses + negative valuations (e.g. v1 不計入 outflows) in given year
+  // For bank/cash envelope model: count expenses + negative valuations + transfers + loan payments in given year
   const y = (year || new Date().getFullYear()).toString();
   let spent = 0;
   for (const tx of D.transactions) {
@@ -844,6 +849,7 @@ function getSubSpent(accId, subId, year) {
     if (tx.type === 'expense') spent += tx.amount;
     else if (tx.type === 'valuation' && tx.amount < 0) spent += Math.abs(tx.amount);
     else if (tx.type === 'transfer') spent += tx.amount;
+    else if (tx.type === 'loan_payment') spent += (tx.principalAmount || 0) + (tx.interestAmount || 0);
   }
   return spent;
 }
@@ -859,8 +865,12 @@ function calcSubBalance(accId, subId) {
       else if (tx.type === 'income') bal += tx.amount;
       else if (tx.type === 'valuation') bal += tx.amount; // signed: negative = outflow/reduction
       else if (tx.type === 'transfer') bal -= tx.amount;
+      else if (tx.type === 'loan_payment') bal -= (tx.principalAmount || 0) + (tx.interestAmount || 0);
     }
-    if (tx.toSubAccountId === subId && tx.type === 'transfer') bal += tx.amount;
+    if (tx.toSubAccountId === subId) {
+      if (tx.type === 'transfer') bal += tx.amount;
+      else if (tx.type === 'loan_payment') bal += (tx.principalAmount || 0); // principal reduces outstanding (less negative)
+    }
   }
   return bal;
 }
@@ -872,6 +882,7 @@ function getMonthTotals(year, month) {
     if (!tx.date.startsWith(prefix)) continue;
     if (tx.type === 'income') inc += tx.amount;
     if (tx.type === 'expense') exp += tx.amount;
+    if (tx.type === 'loan_payment') exp += (tx.interestAmount || 0); // interest is a real expense
   }
   return { inc, exp, net: inc - exp };
 }
@@ -882,6 +893,7 @@ function getYearTotals(year) {
     if (!tx.date.startsWith(year.toString())) continue;
     if (tx.type === 'income') inc += tx.amount;
     if (tx.type === 'expense') exp += tx.amount;
+    if (tx.type === 'loan_payment') exp += (tx.interestAmount || 0); // interest is a real expense
   }
   return { inc, exp, net: inc - exp };
 }
@@ -1003,8 +1015,8 @@ function renderDonut(year, month) {
   const txs = getPeriodTxs(year, month);
   const map = {};
   for (const tx of txs) {
-    if (tx.type !== 'expense') continue;
-    map[tx.category] = (map[tx.category]||0) + tx.amount;
+    if (tx.type === 'expense') map[tx.category] = (map[tx.category]||0) + tx.amount;
+    else if (tx.type === 'loan_payment' && tx.interestAmount > 0) map['貸款利息'] = (map['貸款利息']||0) + tx.interestAmount;
   }
   const items = Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0,6);
   const total = items.reduce((s,[,v]) => s+v, 0);
@@ -1325,12 +1337,19 @@ function renderStatCats() {
   const map = {};
   let total = 0;
   for (const tx of txs) {
-    if (tx.type !== statTab) continue;
-    const cat = tx.category || '未分類';
-    if (!map[cat]) map[cat] = { total:0, items:[] };
-    map[cat].total += tx.amount;
-    map[cat].items.push(tx);
-    total += tx.amount;
+    if (tx.type === statTab) {
+      const cat = tx.category || '未分類';
+      if (!map[cat]) map[cat] = { name: cat, total:0, items:[] };
+      map[cat].total += tx.amount;
+      map[cat].items.push({ tx, dispAmt: tx.amount });
+      total += tx.amount;
+    } else if (tx.type === 'loan_payment' && statTab === 'expense' && tx.interestAmount > 0) {
+      const cat = '貸款利息';
+      if (!map[cat]) map[cat] = { name: cat, total:0, items:[] };
+      map[cat].total += tx.interestAmount;
+      map[cat].items.push({ tx, dispAmt: tx.interestAmount });
+      total += tx.interestAmount;
+    }
   }
   const list = Object.values(Object.fromEntries(Object.entries(map).sort((a,b)=>b[1].total-a[1].total)));
   const el = document.getElementById('stat-cats');
@@ -1338,17 +1357,17 @@ function renderStatCats() {
 
   if (!list.length) { el.innerHTML = '<div class="empty" style="padding:20px"><div class="empty-txt">無資料</div></div>'; return; }
 
-  el.innerHTML = list.map((c, i) => {
+  el.innerHTML = list.map((c) => {
     const pct = total ? (c.total/total*100).toFixed(1) : 0;
-    const txRows = c.items.sort((a,b)=>b.date.localeCompare(a.date)).map(tx =>
+    const txRows = c.items.sort((a,b)=>b.tx.date.localeCompare(a.tx.date)).map(({tx, dispAmt}) =>
       `<div class="cat-det-tx">
         <span>${tx.date.slice(5)} ${tx.desc||''} <span style="color:var(--t3)">${accName(tx.accountId)}</span></span>
-        <span>${fmt(tx.amount)}</span>
+        <span>${fmt(dispAmt)}</span>
       </div>`
     ).join('');
     return `<div class="cat-stat" onclick="this.querySelector('.cat-detail').classList.toggle('open')">
       <div class="cat-stat-row">
-        <span class="cat-stat-name">${c.items[0].category||'未分類'}</span>
+        <span class="cat-stat-name">${c.name}</span>
         <span class="cat-stat-pct">${pct}%</span>
         <span class="cat-stat-amt">${fmt(c.total)}</span>
       </div>
@@ -1356,6 +1375,146 @@ function renderStatCats() {
       <div class="cat-detail">${txRows}</div>
     </div>`;
   }).join('');
+}
+
+// =============================================
+// PDF EXPORT
+// =============================================
+function exportPDF() {
+  const isMonth = statPeriod === 'month';
+  const periodLbl = isMonth
+    ? `${statYear} 年 ${String(statMonth).padStart(2,'0')} 月`
+    : `${statYear} 年`;
+  const totals = isMonth ? getMonthTotals(statYear, statMonth) : getYearTotals(statYear);
+  const txs = getPeriodTxs(statYear, isMonth ? statMonth : null);
+
+  // Expense / income categories
+  const expMap = {}, incMap = {};
+  for (const tx of txs) {
+    if (tx.type === 'expense') { const c = tx.category||'未分類'; expMap[c]=(expMap[c]||0)+tx.amount; }
+    else if (tx.type === 'income') { const c = tx.category||'未分類'; incMap[c]=(incMap[c]||0)+tx.amount; }
+    else if (tx.type === 'loan_payment' && tx.interestAmount > 0) expMap['貸款利息']=(expMap['貸款利息']||0)+tx.interestAmount;
+  }
+  const expCats = Object.entries(expMap).sort((a,b)=>b[1]-a[1]);
+  const incCats = Object.entries(incMap).sort((a,b)=>b[1]-a[1]);
+
+  const catRows = (cats, total) => cats.length
+    ? cats.map(([name,val]) =>
+        `<tr><td>${name}</td><td class="num">${'$'+Math.round(val).toLocaleString()}</td><td class="pct">${total?Math.round(val/total*100):0}%</td></tr>`
+      ).join('')
+    : '<tr><td colspan="3" style="color:#94a3b8">無資料</td></tr>';
+
+  // Account snapshot with sub-accounts
+  const { assets, liab, netWorth } = getTotals();
+  const year = new Date().getFullYear();
+
+  const accSection = D.accounts.map(acc => {
+    const bal = calcBalance(acc.id);
+    const isLiab = acc.type === 'liability';
+    const useEnvelope = acc.subType === 'bank' || acc.subType === 'cash';
+    const balStr = isLiab
+      ? (bal===0 ? '$0' : '-$'+Math.abs(Math.round(bal)).toLocaleString())
+      : '$'+Math.round(bal).toLocaleString();
+    const balColor = isLiab ? '#ef4444' : '#1e293b';
+
+    let subRows = '';
+    if ((acc.subAccounts||[]).length) {
+      let subTotal = 0;
+      subRows = acc.subAccounts.map(sub => {
+        let subVal, dispStr;
+        if (useEnvelope) {
+          const spent = getSubSpent(acc.id, sub.id, year);
+          subVal = sub.budget - spent;
+          subTotal += subVal;
+          const isNeg = subVal < 0;
+          dispStr = (isNeg?'-':'')+'$'+Math.abs(Math.round(subVal)).toLocaleString();
+        } else {
+          subVal = calcSubBalance(acc.id, sub.id);
+          subTotal += subVal;
+          const isNeg = subVal < 0;
+          dispStr = (isNeg?'-':'')+'$'+Math.abs(Math.round(subVal)).toLocaleString();
+        }
+        return `<tr class="sub-row"><td style="padding-left:20px;color:#475569">${sub.name}</td><td class="num" style="color:${subVal<0?'#ef4444':'#475569'}">${dispStr}</td><td class="pct" style="color:#94a3b8">${useEnvelope?'預算 $'+Math.round(sub.budget).toLocaleString():''}</td></tr>`;
+      }).join('');
+
+      if (useEnvelope) {
+        const unalloc = bal - subTotal;
+        subRows += `<tr class="sub-row"><td style="padding-left:20px;color:#f59e0b;font-weight:600">▲ 未分配/閒置</td><td class="num" style="color:${unalloc<0?'#ef4444':'#f59e0b'};font-weight:600">${(unalloc<0?'-':'')+'$'+Math.abs(Math.round(unalloc)).toLocaleString()}</td><td></td></tr>`;
+      }
+    }
+
+    return `<tr class="acc-row"><td><strong>${acc.name}</strong><span style="color:#94a3b8;font-size:11px;margin-left:6px">${SUBTYPE_INFO[acc.subType]?.label||''}</span></td><td class="num" style="color:${balColor};font-weight:700">${balStr}</td><td></td></tr>${subRows}`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html lang="zh-TW"><head>
+<meta charset="UTF-8">
+<title>${D.appName||'MyMoneyApp'} - ${periodLbl} 報表</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#1e293b;padding:28px 36px;font-size:13px}
+  h1{font-size:20px;font-weight:800;margin-bottom:3px}
+  .subtitle{color:#94a3b8;font-size:12px;margin-bottom:24px}
+  .section{margin-bottom:24px;page-break-inside:avoid}
+  .sec-title{font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;border-bottom:1px solid #e2e8f0;padding-bottom:5px}
+  .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px}
+  .sum-box{border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center}
+  .sum-lbl{font-size:10px;color:#94a3b8;margin-bottom:3px}
+  .sum-val{font-size:17px;font-weight:800}
+  .ok{color:#10b981}.bad{color:#ef4444}.pri{color:#6366f1}
+  table{width:100%;border-collapse:collapse}
+  td{padding:6px 4px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+  .num{text-align:right;font-family:'SF Mono',monospace;white-space:nowrap}
+  .pct{text-align:right;color:#94a3b8;font-size:11px;width:44px}
+  .acc-row td{background:#f8fafc;font-size:13px;padding:8px 4px}
+  .sub-row td{font-size:12px}
+  tr:last-child td{border-bottom:none}
+  .footer{margin-top:32px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;display:flex;justify-content:space-between}
+  @media print{
+    body{padding:16px 20px}
+    .section{page-break-inside:avoid}
+    .acc-row{page-break-before:auto}
+    tr{page-break-inside:avoid}
+  }
+</style>
+</head><body>
+<h1>📊 ${D.appName||'MyMoneyApp'} 財務報表</h1>
+<div class="subtitle">${periodLbl} &nbsp;·&nbsp; 產生時間：${new Date().toLocaleString('zh-TW')}</div>
+
+<div class="summary">
+  <div class="sum-box"><div class="sum-lbl">收入</div><div class="sum-val ok">$${Math.round(totals.inc).toLocaleString()}</div></div>
+  <div class="sum-box"><div class="sum-lbl">支出</div><div class="sum-val bad">$${Math.round(totals.exp).toLocaleString()}</div></div>
+  <div class="sum-box"><div class="sum-lbl">結餘</div><div class="sum-val ${totals.net>=0?'ok':'bad'}">${totals.net>=0?'+':'-'}$${Math.abs(Math.round(totals.net)).toLocaleString()}</div></div>
+</div>
+
+<div class="section">
+  <div class="sec-title">支出分類</div>
+  <table>${catRows(expCats, totals.exp)}</table>
+</div>
+
+${incCats.length?`<div class="section">
+  <div class="sec-title">收入分類</div>
+  <table>${catRows(incCats, totals.inc)}</table>
+</div>`:''}
+
+<div class="section">
+  <div class="sec-title">帳戶快照（含子帳戶）</div>
+  <table>
+    ${accSection}
+    <tr style="border-top:2px solid #e2e8f0"><td><strong>淨資產</strong></td><td class="num pri" style="font-weight:800;font-size:15px">$${Math.round(netWorth).toLocaleString()}</td><td></td></tr>
+  </table>
+</div>
+
+<div class="footer">
+  <span>${D.appName||'MyMoneyApp'}</span>
+  <span>${periodLbl} 財務報表</span>
+</div>
+<script>window.onload=()=>window.print();<\/script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { alert('請允許彈出視窗後再試'); return; }
+  w.document.write(html);
+  w.document.close();
 }
 
 // =============================================

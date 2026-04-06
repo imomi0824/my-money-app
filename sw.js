@@ -1,4 +1,4 @@
-const CACHE = 'money-v2-1.7';
+const CACHE = 'money-v2-2.3';
 const URLS = [
   './', './index.html', './manifest.json', './icon.png',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'
